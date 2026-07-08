@@ -356,7 +356,7 @@ export class UIManager {
               </svg>
             </button>
           </div>
-
+        </div>
         <!-- Metrics Grid -->
         <div class="grid grid-cols-2 gap-3 border-y border-slate-100/50 dark:border-zinc-800/50 py-3">
           <div class="flex flex-col">

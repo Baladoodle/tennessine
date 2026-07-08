@@ -135,7 +135,7 @@ export class LatencyGlobe {
 
     // set up camera
     const aspect = this.container.clientWidth / this.container.clientHeight;
-    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 20000);
     this.camera.position.set(0, 5, 12);
 
     // set up renderer
@@ -149,14 +149,13 @@ export class LatencyGlobe {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
     this.controls.minDistance = 6.5;
-    this.controls.maxDistance = 45;
+    this.controls.maxDistance = 500;
 
     // soft ambient light
-    this.ambientLight = new THREE.AmbientLight(0xffffff, this.isDark ? 0.35 : 0.65);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, this.isDark ? 0.6 : 0.85);
     this.scene.add(this.ambientLight);
 
-    // sun directional light
-    this.sunLight = new THREE.DirectionalLight(0xffffff, this.isDark ? 1.4 : 1.0);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, this.isDark ? 1.0 : 0.4);
     this.sunLight.castShadow = false; // direct lighting with no shadow mapping for performance
     this.scene.add(this.sunLight);
 
@@ -242,21 +241,22 @@ export class LatencyGlobe {
     this.scene.add(this.gridGroup);
 
     // 3. create the sun visual model
-    const sunGeo = new THREE.SphereGeometry(1.2, 16, 16);
+    const sunGeo = new THREE.CircleGeometry(22, 32);
     const sunMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a, // soft glowing yellow-200
+      side: THREE.DoubleSide,
     });
     this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
     this.scene.add(this.sunMesh);
-
     // 4. create the moon visual model
-    const moonGeo = new THREE.SphereGeometry(0.25, 16, 16);
-    const moonMat = new THREE.MeshLambertMaterial({
-      color: 0xa1a1aa, // zinc-400 matte gray
+    const moonGeo = new THREE.CircleGeometry(1.36, 32);
+    const moonMat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
     });
     this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
+    this.updateMoonTexture(this.isDark);
     this.scene.add(this.moonMesh);
-
     // initialize groups for dynamic objects
     this.nodesGroup = new THREE.Group();
     this.connectionsGroup = new THREE.Group();
@@ -553,7 +553,7 @@ export class LatencyGlobe {
     const diffDays = (now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24);
     const declination = 23.44 * Math.sin(((2 * Math.PI) / 365) * (diffDays - 80)); // declination based on day count
     
-    const sunPos = this.latLonToVector3(declination, sunLon).normalize().multiplyScalar(35);
+    const sunPos = this.latLonToVector3(declination, sunLon).normalize().multiplyScalar(5000);
     
     if (this.sunLight) this.sunLight.position.copy(sunPos);
     if (this.sunMesh) this.sunMesh.position.copy(sunPos);
@@ -564,13 +564,70 @@ export class LatencyGlobe {
     const moonLat = declination + 5.14 * Math.sin(moonAngle);
     const moonLon = sunLon + (diffDays / 29.53059) * 360; // synodic period
     
-    const moonPos = this.latLonToVector3(moonLat, moonLon).normalize().multiplyScalar(12.0);
+    const moonPos = this.latLonToVector3(moonLat, moonLon).normalize().multiplyScalar(300);
     if (this.moonMesh) this.moonMesh.position.copy(moonPos);
   }
 
   /**
    * triggers theme-specific material shifts.
    */
+  /**
+   * draws the moon texture onto a 2D canvas representing the current lunar phase.
+   * updates the canvas texture dynamically to match the theme.
+   */
+  private updateMoonTexture(dark: boolean) {
+    const knownNewMoon = new Date(Date.UTC(2000, 0, 6, 18, 24, 0));
+    const msSince = Date.now() - knownNewMoon.getTime();
+    const daysSince = msSince / (1000 * 60 * 60 * 24);
+    const lunarAge = daysSince % 29.53059;
+    const phaseFraction = lunarAge / 29.53059;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    
+    ctx.clearRect(0, 0, 256, 256);
+    
+    // dark silhouette
+    ctx.beginPath();
+    ctx.arc(128, 128, 128, 0, Math.PI * 2);
+    ctx.fillStyle = dark ? "#1f2937" : "#e2e8f0"; // slate-200 or gray-800
+    ctx.fill();
+
+    // lit portion based on lunar phase
+    const phi = phaseFraction * Math.PI * 2;
+    ctx.fillStyle = dark ? "#f3f4f6" : "#4b5563"; // gray-100 or gray-600
+    const isRight = phaseFraction < 0.5;
+
+    ctx.beginPath();
+    if (isRight) {
+      ctx.arc(128, 128, 128, -Math.PI / 2, Math.PI / 2);
+    } else {
+      ctx.arc(128, 128, 128, Math.PI / 2, -Math.PI / 2);
+    }
+    
+    const termWidth = 128 * Math.cos(phi);
+    if (isRight) {
+      ctx.ellipse(128, 128, Math.abs(termWidth), 128, 0, Math.PI / 2, -Math.PI / 2, termWidth < 0);
+    } else {
+      ctx.ellipse(128, 128, Math.abs(termWidth), 128, 0, -Math.PI / 2, Math.PI / 2, termWidth < 0);
+    }
+    ctx.fill();
+
+    const moonTexture = new THREE.CanvasTexture(canvas);
+    moonTexture.colorSpace = THREE.SRGBColorSpace;
+    
+    if (this.moonMesh) {
+      const oldMat = this.moonMesh.material as THREE.MeshBasicMaterial;
+      if (oldMat.map) {
+        oldMat.map.dispose();
+      }
+      oldMat.map = moonTexture;
+      oldMat.needsUpdate = true;
+    }
+  }
+
   public setTheme(dark: boolean) {
     this.isDark = dark;
     this.scene.background = new THREE.Color(dark ? 0x09090b : 0xf8fafc);
@@ -585,11 +642,12 @@ export class LatencyGlobe {
 
     // update lighting intensities
     if (this.ambientLight) {
-      this.ambientLight.intensity = dark ? 0.35 : 0.65;
+      this.ambientLight.intensity = dark ? 0.6 : 0.85;
     }
     if (this.sunLight) {
-      this.sunLight.intensity = dark ? 1.4 : 1.0;
+      this.sunLight.intensity = dark ? 1.0 : 0.4;
     }
+    this.updateMoonTexture(dark);
 
     // update grid lines color
     if (this.gridGroup) {
@@ -633,6 +691,8 @@ export class LatencyGlobe {
 
     // 2. update sun and moon orbits
     this.updateCelestialPositions();
+    if (this.sunMesh) this.sunMesh.lookAt(0, 0, 0);
+    if (this.moonMesh) this.moonMesh.lookAt(0, 0, 0);
 
     // 3. slowly rotate globe when no region is selected
     if (!this.selectedRegionId) {
