@@ -14,7 +14,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 const GLOBE_RADIUS = 5;
 const NODE_SIZE = 0.08;
 const GRID_SEGMENTS = 64;
-const GLOBE_ROTATION_OFFSET = Math.PI / 2; // adjust this to rotate the map texture to align with coordinate markers
+const GLOBE_ROTATION_OFFSET = -Math.PI / 2; // adjust this to rotate the map texture to align with coordinate markers
 
 export interface GlobeRegion {
   id: string;
@@ -529,9 +529,9 @@ export class LatencyGlobe {
    */
   private latLonToVector3(lat: number, lon: number): THREE.Vector3 {
     const phi = (lat * Math.PI) / 180;
-    const theta = ((lon + 180) * Math.PI) / 180;
+    const theta = (lon * Math.PI) / 180;
 
-    const x = -(GLOBE_RADIUS * Math.cos(phi) * Math.sin(theta));
+    const x = GLOBE_RADIUS * Math.cos(phi) * Math.sin(theta);
     const y = GLOBE_RADIUS * Math.sin(phi);
     const z = GLOBE_RADIUS * Math.cos(phi) * Math.cos(theta);
 
