@@ -9,3 +9,7 @@ dist/
 .vscode/
 .idea/
 *.log
+
+# vercel
+.vercel/
+.vercel
