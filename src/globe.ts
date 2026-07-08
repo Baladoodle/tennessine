@@ -14,6 +14,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 const GLOBE_RADIUS = 5;
 const NODE_SIZE = 0.08;
 const GRID_SEGMENTS = 64;
+const GLOBE_ROTATION_OFFSET = Math.PI / 2; // adjust this to rotate the map texture to align with coordinate markers
 
 export interface GlobeRegion {
   id: string;
@@ -184,7 +185,7 @@ export class LatencyGlobe {
       transparent: false, // opaque blocks z-fighting / back-facing nodes
     });
     this.landSphere = new THREE.Mesh(landGeo, landMat);
-    this.landSphere.rotation.y = Math.PI / 2;
+    this.landSphere.rotation.y = GLOBE_ROTATION_OFFSET;
     this.scene.add(this.landSphere);
 
     // 1b. outer ocean sphere (uses the specular map to mask transparency)
@@ -197,12 +198,12 @@ export class LatencyGlobe {
       depthWrite: true, // write depth to keep correct node clipping
     });
     this.globeSphere = new THREE.Mesh(sphereGeo, sphereMat);
-    this.globeSphere.rotation.y = Math.PI / 2;
+    this.globeSphere.rotation.y = GLOBE_ROTATION_OFFSET;
     this.scene.add(this.globeSphere);
 
     // 2. wireframe latitude/longitude grid
     this.gridGroup = new THREE.Group();
-    this.gridGroup.rotation.y = Math.PI / 2;
+    this.gridGroup.rotation.y = GLOBE_ROTATION_OFFSET;
     const gridMat = new THREE.LineBasicMaterial({
       color: this.isDark ? 0x27272a : 0xcbd5e1,
       transparent: true,
@@ -705,10 +706,10 @@ export class LatencyGlobe {
       if (this.landSphere) this.landSphere.rotation.y += 0.0005;
     } else {
       // snap back rotations smoothly
-      this.globeSphere.rotation.y = Math.PI / 2;
-      if (this.gridGroup) this.gridGroup.rotation.y = Math.PI / 2;
+      this.globeSphere.rotation.y = GLOBE_ROTATION_OFFSET;
+      if (this.gridGroup) this.gridGroup.rotation.y = GLOBE_ROTATION_OFFSET;
       this.nodesGroup.rotation.y = 0;
-      if (this.landSphere) this.landSphere.rotation.y = Math.PI / 2;
+      if (this.landSphere) this.landSphere.rotation.y = GLOBE_ROTATION_OFFSET;
     }
 
     // 4. animate latency particles along curves (constant speed)
