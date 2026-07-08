@@ -3,7 +3,8 @@
  * @description Three.js interactive 3D globe module.
  * manages the scene, camera, renderer, globe geometry, connection lines,
  * and user interaction (hover/click raycasting).
- * renders a custom monochrome earth using specular map masking.
+ * renders a custom monochrome earth using specular map masking, and accurate
+ * astronomical orbits for the Sun and Moon.
  */
 
 import * as THREE from "three";
@@ -25,6 +26,46 @@ export interface GlobeRegion {
   isSimulated: boolean;
 }
 
+/**
+ * helper to perform spherical linear interpolation (slerp) between two vectors.
+ * writes the result into the target vector.
+ */
+function slerpVectors(
+  v1: THREE.Vector3,
+  v2: THREE.Vector3,
+  t: number,
+  target: THREE.Vector3
+): THREE.Vector3 {
+  const len1 = v1.length();
+  const len2 = v2.length();
+  
+  const u1 = v1.clone().normalize();
+  const u2 = v2.clone().normalize();
+  
+  const dot = Math.max(-1, Math.min(1, u1.dot(u2)));
+  
+  if (dot > 0.9995) {
+    return target.copy(v1).lerp(v2, t);
+  }
+  
+  if (dot < -0.9995) {
+    const temp = Math.abs(u1.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const axis = new THREE.Vector3().crossVectors(u1, temp).normalize();
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, t * Math.PI);
+    const len = len1 + (len2 - len1) * t;
+    return target.copy(u1).applyQuaternion(q).multiplyScalar(len);
+  }
+  
+  const theta = Math.acos(dot);
+  const sinTheta = Math.sin(theta);
+  
+  const w1 = Math.sin((1 - t) * theta) / sinTheta;
+  const w2 = Math.sin(t * theta) / sinTheta;
+  
+  const len = len1 + (len2 - len1) * t;
+  return target.copy(u1).multiplyScalar(w1).addScaledVector(u2, w2).normalize().multiplyScalar(len);
+}
+
 export class LatencyGlobe {
   private container: HTMLElement;
   private scene!: THREE.Scene;
@@ -32,13 +73,17 @@ export class LatencyGlobe {
   private renderer!: THREE.WebGLRenderer;
   private controls!: OrbitControls;
   
-  // materials and geometry references
+  // materials and lighting references
   private isDark = false;
   private landSphere!: THREE.Mesh;
   private globeSphere!: THREE.Mesh;
   private gridGroup!: THREE.Group;
   private nodesGroup!: THREE.Group;
   private connectionsGroup!: THREE.Group;
+  private sunLight!: THREE.DirectionalLight;
+  private sunMesh!: THREE.Mesh;
+  private moonMesh!: THREE.Mesh;
+  private ambientLight!: THREE.AmbientLight;
   
   // interaction state
   private regions: GlobeRegion[] = [];
@@ -71,7 +116,7 @@ export class LatencyGlobe {
   }
 
   /**
-   * sets up the three.js rendering context.
+   * sets up the three.js rendering context and lights.
    */
   private initScene() {
     this.scene = new THREE.Scene();
@@ -96,20 +141,20 @@ export class LatencyGlobe {
     this.controls.maxDistance = 20;
 
     // soft ambient light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, this.isDark ? 0.35 : 0.65);
+    this.scene.add(this.ambientLight);
 
-    // directional light for subtle shadowing
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    dirLight.position.set(5, 10, 7);
-    this.scene.add(dirLight);
+    // sun directional light
+    this.sunLight = new THREE.DirectionalLight(0xffffff, this.isDark ? 1.4 : 1.0);
+    this.sunLight.castShadow = false; // direct lighting with no shadow mapping for performance
+    this.scene.add(this.sunLight);
 
     // resize handler
     window.addEventListener("resize", this.handleResize.bind(this));
   }
 
   /**
-   * draws the double-sphere monochrome globe and the grid lines.
+   * draws the double-sphere monochrome globe, grid lines, sun, and moon.
    */
   private initGlobe() {
     // load high-quality monochrome earth specular map for land/water transparency masking
@@ -122,24 +167,23 @@ export class LatencyGlobe {
       }
     );
 
-    // 1a. inner land sphere (slightly smaller to avoid z-fighting)
+    // 1a. inner land sphere (opaque to block back-facing nodes)
     const landGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 0.99, GRID_SEGMENTS, GRID_SEGMENTS);
-    const landMat = new THREE.MeshBasicMaterial({
+    const landMat = new THREE.MeshLambertMaterial({
       color: this.isDark ? 0x27272a : 0xf1f5f9, // land: zinc-800 or slate-100
-      transparent: true,
-      opacity: 0.8,
+      transparent: false, // opaque blocks z-fighting / back-facing nodes
     });
     this.landSphere = new THREE.Mesh(landGeo, landMat);
     this.scene.add(this.landSphere);
 
     // 1b. outer ocean sphere (uses the specular map to mask transparency)
     const sphereGeo = new THREE.SphereGeometry(GLOBE_RADIUS, GRID_SEGMENTS, GRID_SEGMENTS);
-    const sphereMat = new THREE.MeshBasicMaterial({
+    const sphereMat = new THREE.MeshLambertMaterial({
       color: this.isDark ? 0x09090b : 0xe2e8f0, // oceans: zinc-950 or slate-200
       alphaMap: specularMap,
       transparent: true,
       opacity: 0.95,
-      depthWrite: false,
+      depthWrite: true, // write depth to keep correct node clipping
     });
     this.globeSphere = new THREE.Mesh(sphereGeo, sphereMat);
     this.scene.add(this.globeSphere);
@@ -186,6 +230,22 @@ export class LatencyGlobe {
 
     this.scene.add(this.gridGroup);
 
+    // 3. create the sun visual model
+    const sunGeo = new THREE.SphereGeometry(0.35, 16, 16);
+    const sunMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a, // soft glowing yellow-200
+    });
+    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.scene.add(this.sunMesh);
+
+    // 4. create the moon visual model
+    const moonGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const moonMat = new THREE.MeshLambertMaterial({
+      color: 0xa1a1aa, // zinc-400 matte gray
+    });
+    this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
+    this.scene.add(this.moonMesh);
+
     // initialize groups for dynamic objects
     this.nodesGroup = new THREE.Group();
     this.connectionsGroup = new THREE.Group();
@@ -209,7 +269,6 @@ export class LatencyGlobe {
       const intersects = raycaster.intersectObjects(this.nodesGroup.children, true);
       
       if (intersects.length > 0) {
-        // return parent mesh (node group)
         let obj: THREE.Object3D | null = intersects[0].object;
         while (obj && obj !== this.nodesGroup) {
           if (obj.userData && obj.userData.regionId) {
@@ -320,10 +379,8 @@ export class LatencyGlobe {
     const targetRegion = this.regions.find(r => r.id === regionId);
     if (targetRegion) {
       const pos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
-      // normalize and push camera back slightly
       const targetCamPos = pos.clone().normalize().multiplyScalar(12);
       
-      // smooth interpolation using a simple tween in the animation loop
       const camStart = this.camera.position.clone();
       const duration = 30; // frames
       let frame = 0;
@@ -334,7 +391,6 @@ export class LatencyGlobe {
         }
         frame++;
         const t = frame / duration;
-        // smooth step easing
         const ease = t * t * (3 - 2 * t);
         this.camera.position.lerpVectors(camStart, targetCamPos, ease);
         this.controls.target.set(0, 0, 0); // keep looking at center
@@ -346,7 +402,8 @@ export class LatencyGlobe {
   }
 
   /**
-   * reconstructs static bezier connection curves radiating from the selected origin node.
+   * reconstructs geodesic connection curves radiating from the selected origin node.
+   * uses spherical interpolation (slerp) to prevent curves from clipping through the earth.
    */
   private rebuildConnections() {
     // clear existing connections
@@ -372,18 +429,25 @@ export class LatencyGlobe {
 
       const targetPos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
       
-      // 1. calculate bezier control point to arch above sphere surface
-      const midPoint = new THREE.Vector3().addVectors(originPos, targetPos).multiplyScalar(0.5);
+      // calculate geodesic parameters
       const distance = originPos.distanceTo(targetPos);
       
-      // height based on distance (maximum arch height = 1.5 units)
-      const height = Math.min(1.5, (distance / (GLOBE_RADIUS * 2)) * 2.0);
-      const controlPoint = midPoint.clone().normalize().multiplyScalar(GLOBE_RADIUS + height);
+      // max arch height is 1.2 units above earth surface, proportional to distance
+      const height = Math.min(1.2, (distance / (GLOBE_RADIUS * 2)) * 1.5);
 
-      const curve = new THREE.QuadraticBezierCurve3(originPos, controlPoint, targetPos);
+      // generate slerped points along the geodesic path
+      const points: THREE.Vector3[] = [];
+      const divisions = 32;
+      for (let i = 0; i <= divisions; i++) {
+        const t = i / divisions;
+        const p = new THREE.Vector3();
+        slerpVectors(originPos, targetPos, t, p);
+        // add dynamic arch height peaking at t = 0.5
+        const archHeight = height * Math.sin(t * Math.PI);
+        p.multiplyScalar((GLOBE_RADIUS + archHeight) / GLOBE_RADIUS);
+        points.push(p);
+      }
       
-      // 2. generate curved line mesh
-      const points = curve.getPoints(32);
       const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
 
       // color code the line based on target region health status
@@ -420,6 +484,40 @@ export class LatencyGlobe {
   }
 
   /**
+   * updates the sun and moon coordinates based on real UTC time.
+   */
+  private updateCelestialPositions() {
+    const now = new Date();
+    
+    // 1. calculate sun position (longitude moving 15 degrees per hour, declination over year)
+    const utcHours = now.getUTCHours();
+    const utcMinutes = now.getUTCMinutes();
+    const utcSeconds = now.getUTCSeconds();
+    const utcMs = now.getUTCMilliseconds();
+    
+    const totalHours = utcHours + utcMinutes / 60 + utcSeconds / 3600 + utcMs / 3600000;
+    const sunLon = -15 * (totalHours - 12); // centered at 0 deg at 12:00 UTC
+    
+    const startOfYear = new Date(now.getUTCFullYear(), 0, 1);
+    const diffDays = (now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24);
+    const declination = 23.44 * Math.sin(((2 * Math.PI) / 365) * (diffDays - 80)); // declination based on day count
+    
+    const sunPos = this.latLonToVector3(declination, sunLon).normalize().multiplyScalar(15);
+    
+    if (this.sunLight) this.sunLight.position.copy(sunPos);
+    if (this.sunMesh) this.sunMesh.position.copy(sunPos);
+
+    // 2. calculate moon position (approx. 27.32 day sidereal orbit, 5.14 degree orbital tilt)
+    const moonPeriodDays = 27.32166;
+    const moonAngle = (diffDays / moonPeriodDays) * Math.PI * 2;
+    const moonLat = declination + 5.14 * Math.sin(moonAngle);
+    const moonLon = sunLon + (diffDays / 29.53059) * 360; // synodic period
+    
+    const moonPos = this.latLonToVector3(moonLat, moonLon).normalize().multiplyScalar(8.5);
+    if (this.moonMesh) this.moonMesh.position.copy(moonPos);
+  }
+
+  /**
    * triggers theme-specific material shifts.
    */
   public setTheme(dark: boolean) {
@@ -432,6 +530,14 @@ export class LatencyGlobe {
     }
     if (this.landSphere) {
       (this.landSphere.material as THREE.MeshBasicMaterial).color.setHex(dark ? 0x27272a : 0xf1f5f9);
+    }
+
+    // update lighting intensities
+    if (this.ambientLight) {
+      this.ambientLight.intensity = dark ? 0.35 : 0.65;
+    }
+    if (this.sunLight) {
+      this.sunLight.intensity = dark ? 1.4 : 1.0;
     }
 
     // update grid lines color
@@ -474,7 +580,10 @@ export class LatencyGlobe {
     // 1. update controls damping
     this.controls.update();
 
-    // 2. slowly rotate globe when no region is selected
+    // 2. update sun and moon orbits
+    this.updateCelestialPositions();
+
+    // 3. slowly rotate globe when no region is selected
     if (!this.selectedRegionId) {
       this.globeSphere.rotation.y += 0.0005;
       if (this.gridGroup) this.gridGroup.rotation.y += 0.0005;

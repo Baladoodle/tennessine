@@ -293,12 +293,12 @@ export class UIManager {
   private renderDetailPanel() {
     const region = this.regions.find(r => r.id === this.selectedRegionId);
     if (!region) {
-      this.elDetailPanel.className = "w-full md:w-96 pointer-events-auto backdrop-blur-md bg-white/70 dark:bg-zinc-900/70 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-hidden transition-all transform translate-y-4 opacity-0 scale-95 pointer-events-none duration-300";
+      this.elDetailPanel.className = "w-full pointer-events-auto backdrop-blur-md bg-white/70 dark:bg-zinc-900/70 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-y-auto max-h-[35vh] md:max-h-[50vh] transition-all transform translate-y-4 opacity-0 scale-95 pointer-events-none duration-300";
       return;
     }
 
     // configure animations to slide / fade in
-    this.elDetailPanel.className = "w-full md:w-96 pointer-events-auto backdrop-blur-md bg-white/75 dark:bg-zinc-900/75 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-hidden transition-all transform translate-y-0 opacity-100 scale-100 duration-300";
+    this.elDetailPanel.className = "w-full pointer-events-auto backdrop-blur-md bg-white/75 dark:bg-zinc-900/75 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-y-auto max-h-[35vh] md:max-h-[50vh] transition-all transform translate-y-0 opacity-100 scale-100 duration-300";
 
     // parse details
     const providerTitle = region.provider.toUpperCase();
