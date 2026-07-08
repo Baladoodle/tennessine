@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tennessine Cloud Latency Globe</title>
+    <!-- apple-style clean fonts and reset -->
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="h-full w-full overflow-hidden bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-zinc-950 dark:text-zinc-50 font-sans antialiased">
+    <!-- background 3d scene container -->
+    <div id="canvas-container" class="absolute inset-0 z-0 outline-none"></div>
+
+    <!-- UI Overlay container -->
+    <div id="ui-container" class="absolute inset-0 z-10 flex flex-col pointer-events-none p-4 md:p-6 justify-between select-none">
+      
+      <!-- Top Bar -->
+      <header class="flex w-full items-center justify-between pointer-events-auto">
+        <div class="flex items-center gap-3 backdrop-blur-md bg-white/60 dark:bg-zinc-900/60 border border-slate-200/50 dark:border-zinc-800/50 px-4 py-2 rounded-full shadow-sm transition-all">
+          <div class="flex items-center gap-2">
+            <span class="font-semibold tracking-tight text-sm md:text-base">Tennessine Topology</span>
+            <span class="h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-zinc-600"></span>
+            <span id="global-status-text" class="text-xs text-slate-500 dark:text-zinc-400">Loading metrics...</span>
+          </div>
+          <span id="global-status-dot" class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <!-- Refresh Button -->
+          <button id="btn-refresh" class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-50 hover:bg-white dark:hover:bg-zinc-900 backdrop-blur-md shadow-sm transition-all" title="Request refresh">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M21 20v-5h-.581m-15.356-2a8.001 8.001 0 11-17.21 4.11" />
+            </svg>
+          </button>
+          
+          <!-- Theme Toggle -->
+          <button id="btn-theme" class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-50 hover:bg-white dark:hover:bg-zinc-900 backdrop-blur-md shadow-sm transition-all" title="Toggle theme">
+            <svg id="theme-icon-dark" class="hidden h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.364l-.707-.707M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <svg id="theme-icon-light" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Middle: Region list on left, selected details on right -->
+      <main class="flex-1 my-4 flex flex-col md:flex-row justify-between items-stretch overflow-hidden gap-4">
+        
+        <!-- Sidebar: Region List -->
+        <section class="w-full md:w-80 pointer-events-auto flex flex-col backdrop-blur-md bg-white/60 dark:bg-zinc-900/60 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-hidden transition-all max-h-[40vh] md:max-h-none">
+          <!-- Search and Filters -->
+          <div class="p-4 border-b border-slate-200/50 dark:border-zinc-800/50 flex flex-col gap-2 bg-slate-50/50 dark:bg-zinc-950/20">
+            <input type="text" id="search-input" placeholder="Search region or provider..." class="w-full text-xs md:text-sm px-3 py-2 rounded-xl bg-slate-100/50 dark:bg-zinc-800/50 border border-slate-200/80 dark:border-zinc-700/80 focus:outline-none focus:ring-1 focus:ring-slate-400 dark:focus:ring-zinc-500 focus:bg-white dark:focus:bg-zinc-900 transition-all text-slate-800 dark:text-zinc-200" />
+            
+            <div class="flex gap-1">
+              <button data-provider="all" class="filter-tab px-2.5 py-1 text-[10px] md:text-xs font-medium rounded-lg bg-slate-900 text-white dark:bg-zinc-50 dark:text-zinc-900 transition-all shadow-sm">All</button>
+              <button data-provider="aws" class="filter-tab px-2.5 py-1 text-[10px] md:text-xs font-medium rounded-lg text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 transition-all">AWS</button>
+              <button data-provider="gcp" class="filter-tab px-2.5 py-1 text-[10px] md:text-xs font-medium rounded-lg text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 transition-all">GCP</button>
+              <button data-provider="azure" class="filter-tab px-2.5 py-1 text-[10px] md:text-xs font-medium rounded-lg text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 transition-all">Azure</button>
+            </div>
+          </div>
+          
+          <!-- Scrollable Regions -->
+          <div id="regions-list" class="flex-1 overflow-y-auto p-2 space-y-1 divide-y divide-slate-100/30 dark:divide-zinc-800/30">
+            <!-- populated dynamically -->
+          </div>
+        </section>
+
+        <!-- Right Side: Selected Region Details & Incidents -->
+        <section class="flex-1 flex flex-col justify-end items-end gap-4 max-h-[35vh] md:max-h-none">
+          
+          <!-- Detail Panel -->
+          <div id="detail-panel" class="w-full md:w-96 pointer-events-auto backdrop-blur-md bg-white/70 dark:bg-zinc-900/70 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-hidden transition-all transform translate-y-4 opacity-0 scale-95 pointer-events-none duration-300">
+            <!-- populated dynamically -->
+          </div>
+
+          <!-- Incidents Panel -->
+          <div id="incidents-panel" class="w-full md:w-96 pointer-events-auto backdrop-blur-md bg-white/60 dark:bg-zinc-900/60 border border-slate-200/50 dark:border-zinc-800/50 rounded-3xl shadow-sm overflow-hidden flex flex-col max-h-48 md:max-h-72 transition-all">
+            <div class="px-4 py-3 border-b border-slate-200/50 dark:border-zinc-800/50 flex justify-between items-center bg-slate-50/50 dark:bg-zinc-950/20">
+              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-zinc-500">Active Incidents</span>
+              <span id="incidents-count" class="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-zinc-800 font-medium">0</span>
+            </div>
+            <div id="incidents-list" class="flex-1 overflow-y-auto p-4 space-y-3 text-xs md:text-sm">
+              <div class="text-slate-400 dark:text-zinc-500 text-center py-4">No active outages reported.</div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- Bottom controls info -->
+      <footer class="flex w-full items-center justify-between pointer-events-auto text-[10px] md:text-xs text-slate-400 dark:text-zinc-500">
+        <div class="flex items-center gap-4">
+          <span>Drag to rotate · Scroll to zoom</span>
+          <span class="hidden sm:inline">· Click node to set origin</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span><span>Healthy</span>
+          <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span><span>Degraded</span>
+          <span class="h-1.5 w-1.5 rounded-full bg-red-500"></span><span>Outage</span>
+        </div>
+      </footer>
+
+    </div>
+
+    <!-- app scripts entrypoint -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
