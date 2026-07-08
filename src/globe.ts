@@ -66,6 +66,13 @@ function slerpVectors(
   return target.copy(u1).multiplyScalar(w1).addScaledVector(u2, w2).normalize().multiplyScalar(len);
 }
 
+interface Connection {
+  targetId: string;
+  particle: THREE.Mesh;
+  progress: number;
+  speed: number;
+}
+
 export class LatencyGlobe {
   private container: HTMLElement;
   private scene!: THREE.Scene;
@@ -89,6 +96,7 @@ export class LatencyGlobe {
   private regions: GlobeRegion[] = [];
   private selectedRegionId: string | null = null;
   private hoveredRegionId: string | null = null;
+  private connections: Connection[] = [];
 
   // callbacks for ui integration
   private onSelectRegionCallback?: (regionId: string | null) => void;
@@ -138,7 +146,7 @@ export class LatencyGlobe {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
     this.controls.minDistance = 6.5;
-    this.controls.maxDistance = 20;
+    this.controls.maxDistance = 45;
 
     // soft ambient light
     this.ambientLight = new THREE.AmbientLight(0xffffff, this.isDark ? 0.35 : 0.65);
@@ -231,7 +239,7 @@ export class LatencyGlobe {
     this.scene.add(this.gridGroup);
 
     // 3. create the sun visual model
-    const sunGeo = new THREE.SphereGeometry(0.35, 16, 16);
+    const sunGeo = new THREE.SphereGeometry(1.2, 16, 16);
     const sunMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a, // soft glowing yellow-200
     });
@@ -239,7 +247,7 @@ export class LatencyGlobe {
     this.scene.add(this.sunMesh);
 
     // 4. create the moon visual model
-    const moonGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const moonGeo = new THREE.SphereGeometry(0.25, 16, 16);
     const moonMat = new THREE.MeshLambertMaterial({
       color: 0xa1a1aa, // zinc-400 matte gray
     });
@@ -410,6 +418,7 @@ export class LatencyGlobe {
     while (this.connectionsGroup.children.length > 0) {
       this.connectionsGroup.remove(this.connectionsGroup.children[0]);
     }
+    this.connections = [];
 
     if (!this.selectedRegionId) {
       return;
@@ -433,7 +442,7 @@ export class LatencyGlobe {
       const distance = originPos.distanceTo(targetPos);
       
       // max arch height is 1.2 units above earth surface, proportional to distance
-      const height = Math.min(1.2, (distance / (GLOBE_RADIUS * 2)) * 1.5);
+      const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
 
       // generate slerped points along the geodesic path
       const points: THREE.Vector3[] = [];
@@ -466,6 +475,23 @@ export class LatencyGlobe {
 
       const line = new THREE.Line(lineGeo, lineMat);
       this.connectionsGroup.add(line);
+
+      // generate moving data flow particle (constant speed)
+      const particleGeo = new THREE.SphereGeometry(0.04, 8, 8);
+      const particleMat = new THREE.MeshBasicMaterial({
+        color: 0xe0f2fe, // sky-100 soft blue
+        transparent: true,
+        opacity: 0.9,
+      });
+      const particle = new THREE.Mesh(particleGeo, particleMat);
+      this.connectionsGroup.add(particle);
+
+      this.connections.push({
+        targetId: targetRegion.id,
+        particle,
+        progress: Math.random(), // staggered starting points
+        speed: 0.012, // fast constant speed
+      });
     }
   }
 
@@ -502,7 +528,7 @@ export class LatencyGlobe {
     const diffDays = (now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24);
     const declination = 23.44 * Math.sin(((2 * Math.PI) / 365) * (diffDays - 80)); // declination based on day count
     
-    const sunPos = this.latLonToVector3(declination, sunLon).normalize().multiplyScalar(15);
+    const sunPos = this.latLonToVector3(declination, sunLon).normalize().multiplyScalar(35);
     
     if (this.sunLight) this.sunLight.position.copy(sunPos);
     if (this.sunMesh) this.sunMesh.position.copy(sunPos);
@@ -513,7 +539,7 @@ export class LatencyGlobe {
     const moonLat = declination + 5.14 * Math.sin(moonAngle);
     const moonLon = sunLon + (diffDays / 29.53059) * 360; // synodic period
     
-    const moonPos = this.latLonToVector3(moonLat, moonLon).normalize().multiplyScalar(8.5);
+    const moonPos = this.latLonToVector3(moonLat, moonLon).normalize().multiplyScalar(12.0);
     if (this.moonMesh) this.moonMesh.position.copy(moonPos);
   }
 
@@ -595,6 +621,34 @@ export class LatencyGlobe {
       if (this.gridGroup) this.gridGroup.rotation.y = 0;
       if (this.nodesGroup) this.nodesGroup.rotation.y = 0;
       if (this.landSphere) this.landSphere.rotation.y = 0;
+    }
+
+    // 4. animate latency particles along curves (constant speed)
+    if (this.selectedRegionId && this.connections.length > 0) {
+      const originRegion = this.regions.find(r => r.id === this.selectedRegionId);
+      if (originRegion) {
+        const originPos = this.latLonToVector3(originRegion.lat, originRegion.lon);
+        this.connections.forEach((conn) => {
+          conn.progress += conn.speed;
+          if (conn.progress > 1.0) {
+            conn.progress = 0;
+          }
+          
+          const targetRegion = this.regions.find(r => r.id === conn.targetId);
+          if (targetRegion) {
+            const targetPos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
+            const distance = originPos.distanceTo(targetPos);
+            const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
+            
+            // slerp interpolation for position
+            slerpVectors(originPos, targetPos, conn.progress, conn.particle.position);
+            
+            // arch height scaling
+            const archHeight = height * Math.sin(conn.progress * Math.PI);
+            conn.particle.position.multiplyScalar((GLOBE_RADIUS + archHeight) / GLOBE_RADIUS);
+          }
+        });
+      }
     }
 
     this.renderer.render(this.scene, this.camera);
