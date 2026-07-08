@@ -71,6 +71,9 @@ interface Connection {
   particle: THREE.Mesh;
   progress: number;
   speed: number;
+  delay: number;
+  active: boolean;
+  isInbound: boolean;
 }
 
 export class LatencyGlobe {
@@ -476,22 +479,44 @@ export class LatencyGlobe {
       const line = new THREE.Line(lineGeo, lineMat);
       this.connectionsGroup.add(line);
 
-      // generate moving data flow particle (constant speed)
-      const particleGeo = new THREE.SphereGeometry(0.04, 8, 8);
-      const particleMat = new THREE.MeshBasicMaterial({
-        color: 0xe0f2fe, // sky-100 soft blue
-        transparent: true,
-        opacity: 0.9,
-      });
-      const particle = new THREE.Mesh(particleGeo, particleMat);
-      this.connectionsGroup.add(particle);
+      // only spawn packets if neither server is down (outage)
+      if (originRegion.status !== "outage" && targetRegion.status !== "outage") {
+        const particleGeo = new THREE.SphereGeometry(0.02, 8, 8); // smaller dots
+        const particleMat = new THREE.MeshBasicMaterial({
+          color: 0x10b981, // green
+          transparent: true,
+          opacity: 0.9,
+        });
 
-      this.connections.push({
-        targetId: targetRegion.id,
-        particle,
-        progress: Math.random(), // staggered starting points
-        speed: 0.012, // fast constant speed
-      });
+        // constant speed across physical distance
+        const speed = 0.08 / distance;
+
+        // 1. outbound particle (origin -> target)
+        const outParticle = new THREE.Mesh(particleGeo, particleMat);
+        this.connectionsGroup.add(outParticle);
+        this.connections.push({
+          targetId: targetRegion.id,
+          particle: outParticle,
+          progress: Math.random(),
+          speed,
+          delay: Math.floor(Math.random() * 120),
+          active: Math.random() > 0.5,
+          isInbound: false,
+        });
+
+        // 2. inbound particle (target -> origin)
+        const inParticle = new THREE.Mesh(particleGeo, particleMat);
+        this.connectionsGroup.add(inParticle);
+        this.connections.push({
+          targetId: targetRegion.id,
+          particle: inParticle,
+          progress: Math.random(),
+          speed,
+          delay: Math.floor(Math.random() * 120),
+          active: Math.random() > 0.5,
+          isInbound: true,
+        });
+      }
     }
   }
 
@@ -629,25 +654,42 @@ export class LatencyGlobe {
       if (originRegion) {
         const originPos = this.latLonToVector3(originRegion.lat, originRegion.lon);
         this.connections.forEach((conn) => {
-          conn.progress += conn.speed;
-          if (conn.progress > 1.0) {
-            conn.progress = 0;
+          if (conn.active) {
+            conn.progress += conn.speed;
+            if (conn.progress >= 1.0) {
+              conn.active = false;
+              conn.progress = 0;
+              conn.delay = Math.floor(Math.random() * 120) + 30; // 30 to 150 frames delay
+              conn.particle.visible = false;
+            }
+          } else {
+            conn.delay--;
+            if (conn.delay <= 0) {
+              conn.active = true;
+              conn.particle.visible = true;
+            }
           }
-          
-          const targetRegion = this.regions.find(r => r.id === conn.targetId);
-          if (targetRegion) {
-            const targetPos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
-            const distance = originPos.distanceTo(targetPos);
-            const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
-            
-            // slerp interpolation for position
-            slerpVectors(originPos, targetPos, conn.progress, conn.particle.position);
-            
-            // arch height scaling
-            const archHeight = height * Math.sin(conn.progress * Math.PI);
-            conn.particle.position.multiplyScalar((GLOBE_RADIUS + archHeight) / GLOBE_RADIUS);
+
+          if (conn.active) {
+            const targetRegion = this.regions.find(r => r.id === conn.targetId);
+            if (targetRegion) {
+              const targetPos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
+              const distance = originPos.distanceTo(targetPos);
+              const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
+              
+              // use progress or 1.0 - progress based on direction
+              const t = conn.isInbound ? 1.0 - conn.progress : conn.progress;
+              
+              // slerp interpolation for position
+              slerpVectors(originPos, targetPos, t, conn.particle.position);
+              
+              // arch height scaling
+              const archHeight = height * Math.sin(t * Math.PI);
+              conn.particle.position.multiplyScalar((GLOBE_RADIUS + archHeight) / GLOBE_RADIUS);
+            }
           }
         });
+
       }
     }
 
