@@ -3,7 +3,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { scrapeIncidents } from "../server/scraper";
+import { scrapeIncidents } from "../server/scraper.js";
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");

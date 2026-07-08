@@ -4,8 +4,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { REGIONS } from "../server/regions";
-import { testLatency, scrapeIncidents } from "../server/scraper";
+import { REGIONS } from "../server/regions.js";
+import { testLatency, scrapeIncidents } from "../server/scraper.js";
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");

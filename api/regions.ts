@@ -3,7 +3,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { REGIONS } from "../server/regions";
+import { REGIONS } from "../server/regions.js";
 
 export default function handler(_req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");

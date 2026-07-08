@@ -4,7 +4,7 @@
  * fetches real-time latency and pulls RSS status feeds from cloud providers.
  */
 
-import { REGIONS, type Region } from "./regions";
+import { REGIONS, type Region } from "./regions.js";
 
 export interface LatencyData {
   regionId: string;

@@ -5,8 +5,8 @@
  */
 
 import { serve } from "bun";
-import { REGIONS } from "./regions";
-import { testLatency, scrapeIncidents, type LatencyData, type Incident } from "./scraper";
+import { REGIONS } from "./regions.js";
+import { testLatency, scrapeIncidents, type LatencyData, type Incident } from "./scraper.js";
 
 // constants configuration
 const PORT = process.env.PORT || 3000;
