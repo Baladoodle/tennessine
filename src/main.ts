@@ -122,6 +122,7 @@ function wireSync() {
   ui.setCallbacks(
     (regionId) => {
       globe.selectRegion(regionId);
+      ui.selectRegion(regionId);
     },
     () => {
       triggerPingRefresh();

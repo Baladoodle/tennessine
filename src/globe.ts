@@ -149,7 +149,7 @@ export class LatencyGlobe {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
     this.controls.minDistance = 6.5;
-    this.controls.maxDistance = 500;
+    this.controls.maxDistance = 150;
 
     // soft ambient light
     this.ambientLight = new THREE.AmbientLight(0xffffff, this.isDark ? 0.6 : 0.85);
@@ -184,6 +184,7 @@ export class LatencyGlobe {
       transparent: false, // opaque blocks z-fighting / back-facing nodes
     });
     this.landSphere = new THREE.Mesh(landGeo, landMat);
+    this.landSphere.rotation.y = Math.PI / 2;
     this.scene.add(this.landSphere);
 
     // 1b. outer ocean sphere (uses the specular map to mask transparency)
@@ -196,10 +197,12 @@ export class LatencyGlobe {
       depthWrite: true, // write depth to keep correct node clipping
     });
     this.globeSphere = new THREE.Mesh(sphereGeo, sphereMat);
+    this.globeSphere.rotation.y = Math.PI / 2;
     this.scene.add(this.globeSphere);
 
     // 2. wireframe latitude/longitude grid
     this.gridGroup = new THREE.Group();
+    this.gridGroup.rotation.y = Math.PI / 2;
     const gridMat = new THREE.LineBasicMaterial({
       color: this.isDark ? 0x27272a : 0xcbd5e1,
       transparent: true,
@@ -445,7 +448,7 @@ export class LatencyGlobe {
       const distance = originPos.distanceTo(targetPos);
       
       // max arch height is 1.2 units above earth surface, proportional to distance
-      const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
+      const height = Math.min(0.15, (distance / (GLOBE_RADIUS * 2)) * 0.18);
 
       // generate slerped points along the geodesic path
       const points: THREE.Vector3[] = [];
@@ -702,10 +705,10 @@ export class LatencyGlobe {
       if (this.landSphere) this.landSphere.rotation.y += 0.0005;
     } else {
       // snap back rotations smoothly
-      this.globeSphere.rotation.y = 0;
-      if (this.gridGroup) this.gridGroup.rotation.y = 0;
-      if (this.nodesGroup) this.nodesGroup.rotation.y = 0;
-      if (this.landSphere) this.landSphere.rotation.y = 0;
+      this.globeSphere.rotation.y = Math.PI / 2;
+      if (this.gridGroup) this.gridGroup.rotation.y = Math.PI / 2;
+      this.nodesGroup.rotation.y = 0;
+      if (this.landSphere) this.landSphere.rotation.y = Math.PI / 2;
     }
 
     // 4. animate latency particles along curves (constant speed)
@@ -735,7 +738,7 @@ export class LatencyGlobe {
             if (targetRegion) {
               const targetPos = this.latLonToVector3(targetRegion.lat, targetRegion.lon);
               const distance = originPos.distanceTo(targetPos);
-              const height = Math.min(0.5, (distance / (GLOBE_RADIUS * 2)) * 0.6);
+              const height = Math.min(0.15, (distance / (GLOBE_RADIUS * 2)) * 0.18);
               
               // use progress or 1.0 - progress based on direction
               const t = conn.isInbound ? 1.0 - conn.progress : conn.progress;
