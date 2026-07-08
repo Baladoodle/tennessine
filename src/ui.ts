@@ -27,9 +27,15 @@ export class UIManager {
   private elBtnRefresh = document.getElementById("btn-refresh")!;
   private elThemeIconDark = document.getElementById("theme-icon-dark")!;
   private elThemeIconLight = document.getElementById("theme-icon-light")!;
+  private elSidebarPanel = document.getElementById("sidebar-panel")!;
+  private elIncidentsPanel = document.getElementById("incidents-panel")!;
+  private elBtnHideSidebar = document.getElementById("btn-hide-sidebar")!;
+  private elBtnShowSidebar = document.getElementById("btn-show-sidebar")!;
+  private elBtnHideIncidents = document.getElementById("btn-hide-incidents")!;
+  private elBtnShowIncidents = document.getElementById("btn-show-incidents")!;
 
   // callbacks
-  private onSelectRegionCallback?: (regionId: string) => void;
+  private onSelectRegionCallback?: (regionId: string | null) => void;
   private onRefreshCallback?: () => void;
   private onThemeChangeCallback?: (dark: boolean) => void;
 
@@ -39,7 +45,7 @@ export class UIManager {
   }
 
   public setCallbacks(
-    onSelect: (regionId: string) => void,
+    onSelect: (regionId: string | null) => void,
     onRefresh: () => void,
     onTheme: (dark: boolean) => void
   ) {
@@ -47,7 +53,6 @@ export class UIManager {
     this.onRefreshCallback = onRefresh;
     this.onThemeChangeCallback = onTheme;
   }
-
   /**
    * initializes core UI events (search, tabs, theme toggle, refresh).
    */
@@ -90,6 +95,39 @@ export class UIManager {
       setTimeout(() => this.elBtnRefresh.classList.remove("animate-spin"), 1000);
       if (this.onRefreshCallback) {
         this.onRefreshCallback();
+      }
+    });
+
+    // sidebar collapse/restore
+    this.elBtnHideSidebar.addEventListener("click", () => {
+      this.elSidebarPanel.classList.add("translate-x-[-105%]", "opacity-0", "pointer-events-none");
+      this.elBtnShowSidebar.classList.remove("hidden");
+    });
+    
+    this.elBtnShowSidebar.addEventListener("click", () => {
+      this.elSidebarPanel.classList.remove("translate-x-[-105%]", "opacity-0", "pointer-events-none");
+      this.elBtnShowSidebar.classList.add("hidden");
+    });
+
+    // incidents collapse/restore
+    this.elBtnHideIncidents.addEventListener("click", () => {
+      this.elIncidentsPanel.classList.add("translate-y-[105%]", "opacity-0", "pointer-events-none");
+      this.elBtnShowIncidents.classList.remove("hidden");
+    });
+
+    this.elBtnShowIncidents.addEventListener("click", () => {
+      this.elIncidentsPanel.classList.remove("translate-y-[105%]", "opacity-0", "pointer-events-none");
+      this.elBtnShowIncidents.classList.add("hidden");
+    });
+
+    // details close click via event delegation
+    this.elDetailPanel.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest("#btn-close-detail");
+      if (btn) {
+        if (this.onSelectRegionCallback) {
+          this.onSelectRegionCallback(null);
+        }
       }
     });
   }
@@ -243,7 +281,7 @@ export class UIManager {
   /**
    * handles selecting a region row.
    */
-  public selectRegion(regionId: string) {
+  public selectRegion(regionId: string | null) {
     this.selectedRegionId = regionId;
     this.renderRegionsList();
     this.renderDetailPanel();
@@ -308,10 +346,16 @@ export class UIManager {
             </h2>
             <span class="text-[10px] text-slate-400 dark:text-zinc-500 font-mono mt-0.5">${region.id}</span>
           </div>
-          <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusBadgeClass}">
-            ${statusText}
-          </span>
-        </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusBadgeClass}">
+              ${statusText}
+            </span>
+            <button id="btn-close-detail" class="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors" title="Close details">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
 
         <!-- Metrics Grid -->
         <div class="grid grid-cols-2 gap-3 border-y border-slate-100/50 dark:border-zinc-800/50 py-3">

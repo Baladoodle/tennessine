@@ -2,7 +2,8 @@
  * @file globe.ts
  * @description Three.js interactive 3D globe module.
  * manages the scene, camera, renderer, globe geometry, connection lines,
- * latency particle animations, and user interaction (hover/click raycasting).
+ * and user interaction (hover/click raycasting).
+ * renders a custom monochrome earth using specular map masking.
  */
 
 import * as THREE from "three";
@@ -11,7 +12,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 // global constants
 const GLOBE_RADIUS = 5;
 const NODE_SIZE = 0.08;
-const PARTICLE_SIZE = 0.04;
 const GRID_SEGMENTS = 64;
 
 export interface GlobeRegion {
@@ -25,15 +25,6 @@ export interface GlobeRegion {
   isSimulated: boolean;
 }
 
-interface Connection {
-  targetId: string;
-  curve: THREE.QuadraticBezierCurve3;
-  line: THREE.Line;
-  particle: THREE.Mesh;
-  progress: number;
-  speed: number;
-}
-
 export class LatencyGlobe {
   private container: HTMLElement;
   private scene!: THREE.Scene;
@@ -41,8 +32,9 @@ export class LatencyGlobe {
   private renderer!: THREE.WebGLRenderer;
   private controls!: OrbitControls;
   
-  // materials and geometry references for theme updates
+  // materials and geometry references
   private isDark = false;
+  private landSphere!: THREE.Mesh;
   private globeSphere!: THREE.Mesh;
   private gridGroup!: THREE.Group;
   private nodesGroup!: THREE.Group;
@@ -52,12 +44,9 @@ export class LatencyGlobe {
   private regions: GlobeRegion[] = [];
   private selectedRegionId: string | null = null;
   private hoveredRegionId: string | null = null;
-  private connections: Connection[] = [];
-  private pulseScale = 1.0;
-  private pulseDirection = 1;
 
   // callbacks for ui integration
-  private onSelectRegionCallback?: (regionId: string) => void;
+  private onSelectRegionCallback?: (regionId: string | null) => void;
   private onHoverRegionCallback?: (regionId: string | null) => void;
 
   constructor(container: HTMLElement, isDark: boolean) {
@@ -74,7 +63,7 @@ export class LatencyGlobe {
    * sets callbacks for region select and hover events.
    */
   public setCallbacks(
-    onSelect: (regionId: string) => void,
+    onSelect: (regionId: string | null) => void,
     onHover: (regionId: string | null) => void
   ) {
     this.onSelectRegionCallback = onSelect;
@@ -120,15 +109,36 @@ export class LatencyGlobe {
   }
 
   /**
-   * draws the core globe sphere and the grid lines.
+   * draws the double-sphere monochrome globe and the grid lines.
    */
   private initGlobe() {
-    // 1. base sphere
+    // load high-quality monochrome earth specular map for land/water transparency masking
+    const textureLoader = new THREE.TextureLoader();
+    const specularMap = textureLoader.load(
+      "https://threejs.org/examples/textures/planets/earth_specular_2048.jpg",
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        this.renderer.render(this.scene, this.camera);
+      }
+    );
+
+    // 1a. inner land sphere (slightly smaller to avoid z-fighting)
+    const landGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 0.99, GRID_SEGMENTS, GRID_SEGMENTS);
+    const landMat = new THREE.MeshBasicMaterial({
+      color: this.isDark ? 0x27272a : 0xf1f5f9, // land: zinc-800 or slate-100
+      transparent: true,
+      opacity: 0.8,
+    });
+    this.landSphere = new THREE.Mesh(landGeo, landMat);
+    this.scene.add(this.landSphere);
+
+    // 1b. outer ocean sphere (uses the specular map to mask transparency)
     const sphereGeo = new THREE.SphereGeometry(GLOBE_RADIUS, GRID_SEGMENTS, GRID_SEGMENTS);
     const sphereMat = new THREE.MeshBasicMaterial({
-      color: this.isDark ? 0x18181b : 0xe2e8f0,
+      color: this.isDark ? 0x09090b : 0xe2e8f0, // oceans: zinc-950 or slate-200
+      alphaMap: specularMap,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.95,
       depthWrite: false,
     });
     this.globeSphere = new THREE.Mesh(sphereGeo, sphereMat);
@@ -141,7 +151,6 @@ export class LatencyGlobe {
       transparent: true,
       opacity: 0.15,
     });
-    gridMat.color.setHex(this.isDark ? 0x27272a : 0xcbd5e1);
 
     // draw longitude circles (meridians)
     const segments = GRID_SEGMENTS;
@@ -260,16 +269,14 @@ export class LatencyGlobe {
       this.nodesGroup.remove(obj);
     }
 
-    // rebuild nodes
+    // rebuild nodes - single clean sphere with no saturn rings
     const nodeGeo = new THREE.SphereGeometry(NODE_SIZE, 16, 16);
-    const ringGeo = new THREE.RingGeometry(NODE_SIZE * 1.2, NODE_SIZE * 2.2, 32);
 
     for (const region of this.regions) {
       const pos = this.latLonToVector3(region.lat, region.lon);
       
       const regionNode = new THREE.Group();
       regionNode.position.copy(pos);
-      // look away from center for ring alignment
       regionNode.lookAt(new THREE.Vector3(0, 0, 0));
       regionNode.userData = { regionId: region.id };
 
@@ -286,18 +293,6 @@ export class LatencyGlobe {
       const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
       regionNode.add(nodeMesh);
 
-      // outer pulsing radar ring mesh
-      const ringMat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.4,
-        side: THREE.DoubleSide,
-      });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      // orient flat against sphere surface
-      ringMesh.rotation.x = Math.PI / 2;
-      regionNode.add(ringMesh);
-
       this.nodesGroup.add(regionNode);
     }
 
@@ -310,12 +305,16 @@ export class LatencyGlobe {
   /**
    * highlights a single region and draws latency paths originating from it.
    */
-  public selectRegion(regionId: string) {
+  public selectRegion(regionId: string | null) {
     if (this.selectedRegionId === regionId) {
       return;
     }
     this.selectedRegionId = regionId;
     this.rebuildConnections();
+
+    if (!regionId) {
+      return;
+    }
 
     // animate camera to focus on selected region
     const targetRegion = this.regions.find(r => r.id === regionId);
@@ -347,14 +346,13 @@ export class LatencyGlobe {
   }
 
   /**
-   * reconstructs bezier connection curves radiating from the selected origin node.
+   * reconstructs static bezier connection curves radiating from the selected origin node.
    */
   private rebuildConnections() {
     // clear existing connections
     while (this.connectionsGroup.children.length > 0) {
       this.connectionsGroup.remove(this.connectionsGroup.children[0]);
     }
-    this.connections = [];
 
     if (!this.selectedRegionId) {
       return;
@@ -366,13 +364,6 @@ export class LatencyGlobe {
     }
 
     const originPos = this.latLonToVector3(originRegion.lat, originRegion.lon);
-    const lineMat = new THREE.LineBasicMaterial({
-      color: this.isDark ? 0x3f3f46 : 0xd1d5db,
-      transparent: true,
-      opacity: 0.25,
-    });
-
-    const particleGeo = new THREE.SphereGeometry(PARTICLE_SIZE, 8, 8);
 
     for (const targetRegion of this.regions) {
       if (targetRegion.id === this.selectedRegionId) {
@@ -394,33 +385,23 @@ export class LatencyGlobe {
       // 2. generate curved line mesh
       const points = curve.getPoints(32);
       const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-      const line = new THREE.Line(lineGeo, lineMat);
-      this.connectionsGroup.add(line);
 
-      // 3. generate latency tracker particle
-      let statusColor = 0x10b981; // green
+      // color code the line based on target region health status
+      let lineColor = this.isDark ? 0x3f3f46 : 0xd1d5db; // default gray
       if (targetRegion.status === "outage") {
-        statusColor = 0xef4444; // red
+        lineColor = 0xef4444; // red
       } else if (targetRegion.status === "degraded") {
-        statusColor = 0xf59e0b; // amber
+        lineColor = 0xf59e0b; // amber
       }
 
-      const particleMat = new THREE.MeshBasicMaterial({ color: statusColor });
-      const particle = new THREE.Mesh(particleGeo, particleMat);
-      this.connectionsGroup.add(particle);
-
-      // calculate speed: higher latency = slower particle speed
-      // speed maps 10ms -> 0.01 progress/frame, 500ms -> 0.001 progress/frame
-      const speed = Math.max(0.001, Math.min(0.015, 0.1 / (targetRegion.latency || 50)));
-
-      this.connections.push({
-        targetId: targetRegion.id,
-        curve,
-        line,
-        particle,
-        progress: Math.random(), // randomize start position to offset particles
-        speed,
+      const lineMat = new THREE.LineBasicMaterial({
+        color: lineColor,
+        transparent: true,
+        opacity: 0.35,
       });
+
+      const line = new THREE.Line(lineGeo, lineMat);
+      this.connectionsGroup.add(line);
     }
   }
 
@@ -445,9 +426,12 @@ export class LatencyGlobe {
     this.isDark = dark;
     this.scene.background = new THREE.Color(dark ? 0x09090b : 0xf8fafc);
     
-    // update base sphere color
+    // update base sphere colors (oceans and land)
     if (this.globeSphere) {
-      (this.globeSphere.material as THREE.MeshBasicMaterial).color.setHex(dark ? 0x18181b : 0xe2e8f0);
+      (this.globeSphere.material as THREE.MeshBasicMaterial).color.setHex(dark ? 0x09090b : 0xe2e8f0);
+    }
+    if (this.landSphere) {
+      (this.landSphere.material as THREE.MeshBasicMaterial).color.setHex(dark ? 0x27272a : 0xf1f5f9);
     }
 
     // update grid lines color
@@ -459,9 +443,12 @@ export class LatencyGlobe {
     }
 
     // update connection curve colors
-    if (this.connections.length > 0) {
-      this.connections.forEach((conn) => {
-        (conn.line.material as THREE.LineBasicMaterial).color.setHex(dark ? 0x3f3f46 : 0xd1d5db);
+    if (this.connectionsGroup) {
+      this.connectionsGroup.children.forEach((obj) => {
+        const line = obj as THREE.Line;
+        if (line.material) {
+          (line.material as THREE.LineBasicMaterial).color.setHex(dark ? 0x3f3f46 : 0xd1d5db);
+        }
       });
     }
   }
@@ -490,43 +477,16 @@ export class LatencyGlobe {
     // 2. slowly rotate globe when no region is selected
     if (!this.selectedRegionId) {
       this.globeSphere.rotation.y += 0.0005;
-      this.gridGroup.rotation.y += 0.0005;
-      this.nodesGroup.rotation.y += 0.0005;
+      if (this.gridGroup) this.gridGroup.rotation.y += 0.0005;
+      if (this.nodesGroup) this.nodesGroup.rotation.y += 0.0005;
+      if (this.landSphere) this.landSphere.rotation.y += 0.0005;
     } else {
       // snap back rotations smoothly
       this.globeSphere.rotation.y = 0;
-      this.gridGroup.rotation.y = 0;
-      this.nodesGroup.rotation.y = 0;
+      if (this.gridGroup) this.gridGroup.rotation.y = 0;
+      if (this.nodesGroup) this.nodesGroup.rotation.y = 0;
+      if (this.landSphere) this.landSphere.rotation.y = 0;
     }
-
-    // 3. animate node outer rings (pulsing radar effect)
-    this.pulseScale += 0.015 * this.pulseDirection;
-    if (this.pulseScale > 2.2 || this.pulseScale < 1.0) {
-      this.pulseDirection *= -1;
-    }
-
-    this.nodesGroup.children.forEach((child) => {
-      const group = child as THREE.Group;
-      if (group.children.length > 1) {
-        const ring = group.children[1] as THREE.Mesh;
-        ring.scale.set(this.pulseScale, this.pulseScale, 1);
-        
-        // fade opacity out as ring expands
-        const ringMat = ring.material as THREE.MeshBasicMaterial;
-        ringMat.opacity = Math.max(0, 0.5 - (this.pulseScale - 1.0) * 0.4);
-      }
-    });
-
-    // 4. animate latency particles along curves
-    this.connections.forEach((conn) => {
-      conn.progress += conn.speed;
-      if (conn.progress > 1.0) {
-        conn.progress = 0;
-      }
-      
-      const newPos = conn.curve.getPointAt(conn.progress);
-      conn.particle.position.copy(newPos);
-    });
 
     this.renderer.render(this.scene, this.camera);
   }
